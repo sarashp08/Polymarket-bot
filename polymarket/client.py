@@ -54,6 +54,8 @@ class PaperTrader:
         self.positions: Dict[str, PaperPosition] = {}
         self.closed_positions: List[PaperPosition] = []
         self._load()
+        # Snapshot of bankroll at the start of THIS session (after loading saved state)
+        self.session_start_bankroll: float = self.bankroll
 
     # ── Persistence ──────────────────────────────────────────────────────────
 

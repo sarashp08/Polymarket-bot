@@ -42,6 +42,9 @@ class Config:
     telegram_token: str = os.getenv("TELEGRAM_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
 
+    # ── Risk Guards ───────────────────────────────────────────────────
+    max_daily_loss_pct: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "10.0"))
+
     # ── Logging ───────────────────────────────────────────────────────
     dashboard_interval_minutes: int = 60
     log_file: str = "trades.json"

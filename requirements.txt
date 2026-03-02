@@ -3,4 +3,8 @@ python-telegram-bot==21.3
 python-dotenv==1.0.1
 aiohttp==3.9.5
 numpy==1.26.4
-py-clob-client==0.18.0
+cffi>=1.15.0
+cryptography>=41.0.0
+# py-clob-client is only needed for live trading (not paper mode)
+# Uncomment when ready for live trading:
+# py-clob-client==0.18.0

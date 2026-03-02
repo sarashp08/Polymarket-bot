@@ -21,6 +21,7 @@ Loops running concurrently:
 
 import asyncio
 import logging
+import signal
 import sys
 
 from config import config
@@ -79,6 +80,19 @@ telegram = TelegramNotifier(
 # ── Signal handler ─────────────────────────────────────────────────────────────
 
 async def on_signal(signal: TradeSignal):
+    # 0. Session loss guard — stop trading if down too much from session start
+    session_loss_pct = (
+        (trader.bankroll - trader.session_start_bankroll)
+        / trader.session_start_bankroll
+        * 100
+    )
+    if session_loss_pct <= -config.max_daily_loss_pct:
+        logger.warning(
+            f"Session loss limit hit ({session_loss_pct:.1f}%) — "
+            f"trading paused for this session"
+        )
+        return
+
     # 1. Notify Telegram about the raw signal
     await telegram.send(fmt_signal(signal))
 
@@ -164,9 +178,34 @@ async def dashboard_loop():
             logger.error(f"Dashboard loop error: {exc}", exc_info=True)
 
 
+# ── Graceful shutdown ──────────────────────────────────────────────────────────
+
+async def shutdown(loop: asyncio.AbstractEventLoop):
+    """Cancel all running tasks and save state cleanly."""
+    logger.info("Shutting down — saving state…")
+    feed.stop()
+    trader._save()
+
+    tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    loop.stop()
+    logger.info("Bot stopped cleanly.")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 async def main():
+    loop = asyncio.get_running_loop()
+
+    # Register SIGTERM / SIGINT for graceful shutdown
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(
+            sig,
+            lambda: asyncio.create_task(shutdown(loop)),
+        )
+
     # Register callbacks
     engine.on_signal(on_signal)
     feed.on_trade(analyzer.on_trade).on_orderbook(analyzer.on_orderbook)
@@ -192,11 +231,9 @@ async def main():
         signal_loop(),
         resolution_loop(),
         dashboard_loop(),
+        return_exceptions=True,
     )
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
+    asyncio.run(main())

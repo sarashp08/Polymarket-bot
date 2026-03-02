@@ -10,13 +10,14 @@ Components:
   PaperTrader      → simulates Polymarket YES/NO positions (paper mode)
   PositionSizer    → computes trade size as fixed % of bankroll
   TradeTracker     → accumulates session stats for the dashboard
-  TelegramNotifier → sends signal / entry / result / dashboard messages
+  TelegramBot      → sends alerts + receives /status /positions /pause /resume
 
 Loops running concurrently:
-  feed.start()       → Binance WebSocket (trade + orderbook)
-  signal_loop()      → evaluates signals every 30 s per timeframe
-  resolution_loop()  → checks for expired paper positions every 10 s
-  dashboard_loop()   → sends hourly P&L dashboard to Telegram
+  feed.start()              → Binance WebSocket (trade + orderbook)
+  signal_loop()             → evaluates signals every 30 s per timeframe
+  resolution_loop()         → checks for expired paper positions every 10 s
+  dashboard_loop()          → sends hourly P&L dashboard to Telegram
+  telegram.start_polling()  → listens for phone commands
 """
 
 import asyncio
@@ -25,8 +26,11 @@ import signal
 import sys
 
 from config import config
-from bot.formatters import fmt_dashboard, fmt_entry, fmt_result, fmt_signal, fmt_startup
-from bot.telegram_bot import TelegramNotifier
+from bot.formatters import (
+    fmt_dashboard, fmt_entry, fmt_result, fmt_signal, fmt_startup,
+    fmt_status, fmt_positions,
+)
+from bot.telegram_bot import TelegramBot
 from data.binance_feed import BinanceFeed
 from data.orderflow import OrderFlowAnalyzer
 from polymarket.client import PaperTrader
@@ -72,15 +76,20 @@ sizer = PositionSizer(
 )
 
 tracker = TradeTracker()
-telegram = TelegramNotifier(
+telegram = TelegramBot(
     token=config.telegram_token,
     chat_id=config.telegram_chat_id,
 )
 
 # ── Signal handler ─────────────────────────────────────────────────────────────
 
-async def on_signal(signal: TradeSignal):
-    # 0. Session loss guard — stop trading if down too much from session start
+async def on_signal(sig: TradeSignal):
+    # 0. Pause guard — user sent /pause from phone
+    if telegram.paused:
+        logger.info("Trade skipped: bot is paused via Telegram /pause")
+        return
+
+    # 1. Session loss guard — stop trading if down too much from session start
     session_loss_pct = (
         (trader.bankroll - trader.session_start_bankroll)
         / trader.session_start_bankroll
@@ -93,41 +102,41 @@ async def on_signal(signal: TradeSignal):
         )
         return
 
-    # 1. Notify Telegram about the raw signal
-    await telegram.send(fmt_signal(signal))
+    # 2. Notify Telegram about the raw signal
+    await telegram.send(fmt_signal(sig))
 
-    # 2. Compute position size
+    # 3. Compute position size
     size = sizer.size(
         bankroll=trader.bankroll,
         open_positions=trader.open_count,
-        confidence=signal.confidence,
+        confidence=sig.confidence,
     )
 
     if size.amount_usd <= 0:
         logger.info("Trade skipped: max open positions reached or bankroll too low")
         return
 
-    # 3. Paper trade entry price
+    # 4. Paper trade entry price
     # On Polymarket, BTC 5m/15m binary markets typically open close to 0.50.
     # We simulate buying at 0.50 (fair odds). Our edge comes from being right
     # more than 50% of the time, not from price arbitrage.
     entry_price = 0.50
 
-    # 4. Build question label
+    # 5. Build question label
     question = (
-        f"Will BTC be HIGHER in {signal.timeframe}?"
-        if signal.direction == "UP"
-        else f"Will BTC be LOWER in {signal.timeframe}?"
+        f"Will BTC be HIGHER in {sig.timeframe}?"
+        if sig.direction == "UP"
+        else f"Will BTC be LOWER in {sig.timeframe}?"
     )
 
-    # 5. Open paper position
+    # 6. Open paper position
     pos = trader.open_position(
-        direction=signal.direction,
+        direction=sig.direction,
         cost_usd=size.amount_usd,
         entry_price=entry_price,
-        entry_btc_price=signal.price,
+        entry_btc_price=sig.price,
         question=question,
-        timeframe=signal.timeframe,
+        timeframe=sig.timeframe,
     )
 
     if pos:
@@ -185,6 +194,7 @@ async def shutdown(loop: asyncio.AbstractEventLoop):
     logger.info("Shutting down — saving state…")
     feed.stop()
     trader._save()
+    await telegram.stop()
 
     tasks = [t for t in asyncio.all_tasks(loop) if t is not asyncio.current_task()]
     for t in tasks:
@@ -206,7 +216,15 @@ async def main():
             lambda: asyncio.create_task(shutdown(loop)),
         )
 
-    # Register callbacks
+    # Wire Telegram /status and /positions providers
+    telegram.set_status_provider(
+        lambda: fmt_status(trader=trader, tracker=tracker, paused=telegram.paused)
+    )
+    telegram.set_positions_provider(
+        lambda: fmt_positions(trader=trader)
+    )
+
+    # Register feed and signal callbacks
     engine.on_signal(on_signal)
     feed.on_trade(analyzer.on_trade).on_orderbook(analyzer.on_orderbook)
 
@@ -231,6 +249,7 @@ async def main():
         signal_loop(),
         resolution_loop(),
         dashboard_loop(),
+        telegram.start_polling(),
         return_exceptions=True,
     )
 

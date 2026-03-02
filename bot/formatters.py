@@ -104,6 +104,45 @@ def fmt_dashboard(
     )
 
 
+def fmt_status(trader, tracker: TradeTracker, paused: bool) -> str:
+    """Live status for the /status command."""
+    s = tracker.overall
+    session_pnl = trader.bankroll - trader.session_start_bankroll
+    pnl_emoji = "📈" if session_pnl >= 0 else "📉"
+    state = "⏸ PAUSED" if paused else "▶️ ACTIVE"
+    win_line = (
+        f"`{s.wins}W / {s.losses}L`  ({s.win_rate:.0%} WR)"
+        if s.total > 0
+        else "No trades yet"
+    )
+    return (
+        f"📊 *Bot Status* — {state}\n"
+        f"{'─' * 28}\n"
+        f"💼 Bankroll: `${trader.bankroll:.2f}`\n"
+        f"📈 Session P&L: `{_pnl_str(session_pnl)}`  {pnl_emoji}\n"
+        f"📂 Open positions: `{trader.open_count}`\n"
+        f"🏆 Session trades: {win_line}\n"
+        f"⏱ Runtime: `{s.runtime_hours:.1f}h`"
+    )
+
+
+def fmt_positions(trader) -> str:
+    """Open position list for the /positions command."""
+    if not trader.positions:
+        return "📂 No open positions right now."
+    now = time.time()
+    lines = []
+    for pos in trader.positions.values():
+        remaining = max(0, int(pos.resolve_time - now))
+        emoji = "📈" if pos.direction == "UP" else "📉"
+        lines.append(
+            f"{emoji} `{pos.id}`  {pos.direction} {pos.timeframe}\n"
+            f"   💵 `${pos.cost_usd:.2f}`  ₿ entry `${pos.entry_btc_price:,.0f}`  ⏳ `{remaining}s`"
+        )
+    header = f"📂 *Open Positions* ({len(trader.positions)})\n{'─' * 28}\n"
+    return header + "\n".join(lines)
+
+
 def fmt_startup(
     bankroll: float,
     risk_pct: float,

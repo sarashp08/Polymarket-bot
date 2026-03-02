@@ -1,0 +1,6 @@
+websockets==12.0
+python-telegram-bot==21.3
+python-dotenv==1.0.1
+aiohttp==3.9.5
+numpy==1.26.4
+py-clob-client==0.18.0

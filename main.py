@@ -27,7 +27,7 @@ import sys
 
 from config import config
 from bot.formatters import (
-    fmt_dashboard, fmt_entry, fmt_result, fmt_signal, fmt_startup,
+    fmt_dashboard, fmt_entry, fmt_result, fmt_startup,
     fmt_status, fmt_positions,
 )
 from bot.telegram_bot import TelegramBot
@@ -102,10 +102,7 @@ async def on_signal(sig: TradeSignal):
         )
         return
 
-    # 2. Notify Telegram about the raw signal
-    await telegram.send(fmt_signal(sig))
-
-    # 3. Compute position size
+    # 2. Compute position size
     size = sizer.size(
         bankroll=trader.bankroll,
         open_positions=trader.open_count,
@@ -140,7 +137,7 @@ async def on_signal(sig: TradeSignal):
     )
 
     if pos:
-        await telegram.send(fmt_entry(pos))
+        await telegram.send(fmt_entry(pos, sig))
 
 
 # ── Background loops ───────────────────────────────────────────────────────────
@@ -165,7 +162,7 @@ async def resolution_loop():
                 resolved = await trader.check_resolutions(current_price)
                 for pos in resolved:
                     tracker.record(pos)
-                    await telegram.send(fmt_result(pos))
+                    await telegram.send(fmt_result(pos, tracker))
         except Exception as exc:
             logger.error(f"Resolution loop error: {exc}", exc_info=True)
         await asyncio.sleep(10)

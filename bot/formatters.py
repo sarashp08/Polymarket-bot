@@ -37,34 +37,48 @@ def fmt_signal(sig: TradeSignal) -> str:
     )
 
 
-def fmt_entry(pos: PaperPosition) -> str:
-    side = "🟢 BUY YES" if pos.direction == "UP" else "🔴 BUY NO"
-    resolves_in = max(0, int(pos.resolve_time - time.time()))
-    return (
-        f"{'─' * 28}\n"
-        f"✅ *POSITION OPENED*\n"
-        f"{'─' * 28}\n"
-        f"{side}  `{pos.timeframe}`\n"
-        f"💵 Size: `${pos.cost_usd:.2f}` → {pos.shares:.4f} shares @ ${pos.entry_price:.3f}\n"
-        f"₿  BTC Entry: `${pos.entry_btc_price:,.2f}`\n"
-        f"⏳ Resolves in: *{resolves_in}s*\n"
-        f"🆔 `{pos.id}`"
-    )
+def fmt_entry(pos: PaperPosition, sig: "TradeSignal | None" = None) -> str:
+    side = "🟢 BUY YES (UP)" if pos.direction == "UP" else "🔴 BUY NO (DOWN)"
+    resolve_clock = time.strftime("%H:%M UTC", time.gmtime(pos.resolve_time))
+    lines = [
+        f"{'─' * 28}",
+        f"✅ *TRADE ENTERED*",
+        f"{'─' * 28}",
+        f"{side}  —  BTC `{pos.timeframe}` market",
+        f"₿  BTC @ `${pos.entry_btc_price:,.2f}`",
+        f"💵 Stake: `${pos.cost_usd:.2f}`  →  {pos.shares:.2f} shares @ $0.50",
+        f"⏰ Resolves at: `{resolve_clock}`",
+    ]
+    if sig is not None:
+        bullets = "  •  ".join(sig.signals_fired)
+        lines.append(f"🎯 Confidence: *{sig.confidence_label}* ({sig.confidence:.0%})")
+        lines.append(f"📊 `{bullets}`")
+    lines.append(f"🆔 `{pos.id}`")
+    return "\n".join(lines)
 
 
-def fmt_result(pos: PaperPosition) -> str:
-    icon = "🏆 WON" if pos.status == "WON" else "💀 LOST"
+def fmt_result(pos: PaperPosition, tracker: "TradeTracker | None" = None) -> str:
+    icon = "🏆 *WON*" if pos.status == "WON" else "💀 *LOST*"
+    direction_emoji = "📈" if pos.direction == "UP" else "📉"
     price_move = pos.exit_btc_price - pos.entry_btc_price
     move_str = f"+${price_move:,.0f}" if price_move >= 0 else f"-${abs(price_move):,.0f}"
-    return (
-        f"{'─' * 28}\n"
-        f"{icon}  *POSITION CLOSED*\n"
-        f"{'─' * 28}\n"
-        f"{'📈' if pos.direction == 'UP' else '📉'} {pos.direction}  `{pos.timeframe}`\n"
-        f"₿  BTC: `${pos.entry_btc_price:,.0f}` → `${pos.exit_btc_price:,.0f}`  ({move_str})\n"
-        f"💰 P&L: `{_pnl_str(pos.pnl)}`\n"
-        f"🆔 `{pos.id}`"
-    )
+    pnl_pct = (pos.pnl / pos.cost_usd) * 100
+
+    lines = [
+        f"{'─' * 28}",
+        f"{icon}  {direction_emoji} {pos.direction}  `{pos.timeframe}`",
+        f"{'─' * 28}",
+        f"₿  BTC: `${pos.entry_btc_price:,.0f}` → `${pos.exit_btc_price:,.0f}`  ({move_str})",
+        f"💰 P&L: `{_pnl_str(pos.pnl)}`  (`{pnl_pct:+.0f}%` on stake)",
+    ]
+    if tracker is not None:
+        s = tracker.overall
+        lines.append(
+            f"📊 Session: `{s.wins}W / {s.losses}L`  |  "
+            f"Total P&L `{_pnl_str(s.pnl)}`  |  WR `{s.win_rate:.0%}`"
+        )
+    lines.append(f"🆔 `{pos.id}`")
+    return "\n".join(lines)
 
 
 def fmt_dashboard(

@@ -18,13 +18,17 @@ class Config:
     max_open_trades: int = int(os.getenv("MAX_OPEN_TRADES", "3"))
 
     # ── Signal Settings ───────────────────────────────────────────────
-    timeframes: List[str] = field(default_factory=lambda: ["5m", "15m"])
+    timeframes: List[str] = field(
+        default_factory=lambda: [
+            tf.strip() for tf in os.getenv("TIMEFRAMES", "15m").split(",")
+        ]
+    )
     min_confluence: int = 2                          # signals needed to fire a trade
     cvd_threshold: float = float(os.getenv("CVD_THRESHOLD", "5.0"))     # BTC units
     ob_imbalance_threshold: float = 0.60            # bid ratio above this = bullish
     volume_spike_multiplier: float = 2.0            # Nx rolling average = spike
     whale_usd_threshold: float = float(os.getenv("WHALE_THRESHOLD", "50000"))
-    signal_cooldown_seconds: int = int(os.getenv("SIGNAL_COOLDOWN", "60"))
+    signal_cooldown_seconds: int = int(os.getenv("SIGNAL_COOLDOWN", "900"))
 
     # ── Binance ───────────────────────────────────────────────────────
     binance_symbol: str = "BTCUSDT"

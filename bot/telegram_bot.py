@@ -57,7 +57,10 @@ class TelegramBot:
     # ── Auth guard ────────────────────────────────────────────────────────────
 
     def _authorized(self, update: Update) -> bool:
-        return str(update.effective_chat.id) == self._chat_id
+        # Check the USER who sent the command, not the chat it was sent in.
+        # This makes commands work in both DMs and group chats as long as
+        # the sender is the configured owner (personal chat_id == user_id).
+        return str(update.effective_user.id) == self._chat_id
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
@@ -120,6 +123,17 @@ class TelegramBot:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+    async def _cmd_chatid(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """No auth gate — anyone can call this to discover chat/user IDs."""
+        chat = update.effective_chat
+        user = update.effective_user
+        await update.message.reply_text(
+            f"🆔 *Chat ID:* `{chat.id}`\n"
+            f"👤 *Your user ID:* `{user.id}`\n\n"
+            f"Set `TELEGRAM_CHAT_ID={chat.id}` in .env to send notifications here.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     def _register_handlers(self):
         self._app.add_handler(CommandHandler("start", self._cmd_start))
         self._app.add_handler(CommandHandler("help", self._cmd_help))
@@ -127,6 +141,7 @@ class TelegramBot:
         self._app.add_handler(CommandHandler("positions", self._cmd_positions))
         self._app.add_handler(CommandHandler("pause", self._cmd_pause))
         self._app.add_handler(CommandHandler("resume", self._cmd_resume))
+        self._app.add_handler(CommandHandler("chatid", self._cmd_chatid))
 
     # ── Outbound ──────────────────────────────────────────────────────────────
 

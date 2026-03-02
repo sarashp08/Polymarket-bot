@@ -61,6 +61,20 @@ class TelegramBot:
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
+    async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorized(update):
+            return
+        await update.message.reply_text(
+            "👋 *Polymarket BTC Bot is running!*\n"
+            "─────────────────────────────\n"
+            "/status — bankroll & session stats\n"
+            "/positions — list open positions\n"
+            "/pause — stop opening new trades\n"
+            "/resume — resume trading\n"
+            "/help — show this message",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
@@ -107,6 +121,7 @@ class TelegramBot:
         )
 
     def _register_handlers(self):
+        self._app.add_handler(CommandHandler("start", self._cmd_start))
         self._app.add_handler(CommandHandler("help", self._cmd_help))
         self._app.add_handler(CommandHandler("status", self._cmd_status))
         self._app.add_handler(CommandHandler("positions", self._cmd_positions))

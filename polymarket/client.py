@@ -24,7 +24,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import aiohttp
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -216,93 +216,144 @@ class PaperTrader:
 
 # ── Market discovery ─────────────────────────────────────────────────────────────
 
-BTC_KEYWORDS = ["bitcoin", "btc"]
-DIRECTION_KEYWORDS = ["higher", "lower", "above", "below", "up", "down"]
-TF_HINTS = {
-    "5m": ["5 min", "five min"],
-    "15m": ["15 min", "fifteen min"],
+# These BTC up/down series markets use a slug with the window start timestamp.
+# The slug pattern is: btc-updown-{tf}-{unix_ts}
+# Window timestamps are aligned to timeframe-second boundaries.
+_TF_SLUG_PREFIX = {
+    "5m":  "btc-updown-5m",
+    "15m": "btc-updown-15m",
 }
 
 
 async def find_active_market(timeframe: str) -> Optional[dict]:
     """
-    Query Gamma API for the currently active BTC direction market
-    matching the given timeframe (e.g. "15m").
+    Find the active BTC up/down market for the given timeframe.
 
-    Returns the market dict (with 'tokens', 'condition_id', etc.)
-    or None if nothing is found.
+    Uses slug-based discovery: constructs the expected slug from the current
+    UTC time (e.g. btc-updown-15m-1772559900) and fetches it directly.
+    Tries current window and the next window in case of boundary conditions.
     """
-    params = {"active": "true", "closed": "false", "limit": 100}
-    async with aiohttp.ClientSession() as session:
+    prefix = _TF_SLUG_PREFIX.get(timeframe)
+    if not prefix:
+        logger.error(f"No slug prefix for timeframe {timeframe}")
+        return None
+
+    window_secs = TIMEFRAME_SECONDS.get(timeframe, 900)
+    now = int(time.time())
+
+    # Try current window, then next (handles boundary / pre-open next window)
+    for offset in (0, window_secs):
+        window_ts = ((now + offset) // window_secs) * window_secs
+        slug = f"{prefix}-{window_ts}"
+
         try:
-            async with session.get(f"{GAMMA_API}/markets", params=params) as resp:
-                if resp.status != 200:
-                    logger.error(f"Gamma API returned {resp.status}")
-                    return None
-                markets = await resp.json()
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{GAMMA_API}/markets", params={"slug": slug}
+                )
+                if resp.status_code != 200:
+                    logger.warning(f"Gamma API {resp.status_code} for slug {slug}")
+                    continue
+                markets = resp.json()
+
+            if not markets:
+                logger.debug(f"No market found for slug {slug}")
+                continue
+
+            market = markets[0]
+
+            if market.get("closed"):
+                logger.debug(f"Market {slug} is closed, trying next window")
+                continue
+
+            if not market.get("active"):
+                logger.debug(f"Market {slug} not active, trying next window")
+                continue
+
+            logger.info(
+                f"Found market: {market.get('question', slug)[:80]}"
+            )
+            return market
+
         except Exception as exc:
-            logger.error(f"Gamma API error: {exc}")
-            return None
+            logger.error(f"Market lookup error for slug {slug}: {exc}")
 
-    tf_hints = TF_HINTS.get(timeframe, [])
-    best = None
+    logger.warning(f"No active BTC {timeframe} market found on Polymarket")
+    return None
 
-    for m in markets:
-        q = (m.get("question") or "").lower()
-        # Must mention BTC
-        if not any(kw in q for kw in BTC_KEYWORDS):
-            continue
-        # Must be a direction market
-        if not any(kw in q for kw in DIRECTION_KEYWORDS):
-            continue
-        # Must match timeframe
-        if not any(hint in q for hint in tf_hints):
-            continue
-        # Must have tokens
-        tokens = m.get("tokens") or m.get("clobTokenIds")
-        if not tokens:
-            continue
-        # Prefer the market with the latest end time (most recently opened)
-        if best is None:
-            best = m
-        else:
-            best_end = best.get("endDate", "") or ""
-            m_end = m.get("endDate", "") or ""
-            if m_end > best_end:
-                best = m
 
-    if best:
-        logger.info(f"Found market: {best.get('question', '?')[:80]}")
-    else:
-        logger.warning(f"No active BTC {timeframe} market found on Polymarket")
-    return best
+def _parse_json_field(value) -> list:
+    """Parse a field that may be a JSON-encoded string or already a list."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    return []
 
 
 def _extract_token_ids(market: dict) -> Optional[tuple]:
     """
-    Extract (yes_token_id, no_token_id) from a Gamma API market dict.
+    Extract (up_token_id, down_token_id) from a Gamma API market dict.
+
+    These markets use "Up"/"Down" outcomes (not "YES"/"NO").
+    clobTokenIds order matches outcomes order: [up_id, down_id].
     Returns None if tokens can't be parsed.
     """
     tokens = market.get("tokens")
     if tokens and isinstance(tokens, list) and len(tokens) >= 2:
-        yes_id = None
-        no_id = None
+        up_id = None
+        down_id = None
         for t in tokens:
             outcome = (t.get("outcome") or "").upper()
             tid = t.get("token_id")
-            if outcome == "YES":
-                yes_id = tid
-            elif outcome == "NO":
-                no_id = tid
-        if yes_id and no_id:
-            return yes_id, no_id
+            if outcome in ("YES", "UP"):
+                up_id = tid
+            elif outcome in ("NO", "DOWN"):
+                down_id = tid
+        if up_id and down_id:
+            return up_id, down_id
 
-    # Fallback: clobTokenIds is [yes_id, no_id]
-    clob_ids = market.get("clobTokenIds")
-    if clob_ids and isinstance(clob_ids, list) and len(clob_ids) >= 2:
+    # Gamma API returns clobTokenIds as a JSON-encoded string: ["id1", "id2"]
+    # Order is [up_token_id, down_token_id] matching the outcomes array.
+    clob_ids = _parse_json_field(market.get("clobTokenIds"))
+    if len(clob_ids) >= 2:
         return clob_ids[0], clob_ids[1]
 
     return None
+
+
+def get_market_entry_price(market: dict, direction: str) -> float:
+    """
+    Return the current market price for the given direction token.
+    Falls back to 0.50 if the price can't be read.
+    """
+    # CLOB-style tokens list (when market dict comes from CLOB API)
+    tokens = market.get("tokens")
+    if tokens and isinstance(tokens, list):
+        for t in tokens:
+            outcome = (t.get("outcome") or "").upper()
+            price = t.get("price")
+            if price is not None:
+                if direction == "UP" and outcome in ("YES", "UP"):
+                    return float(price)
+                if direction == "DOWN" and outcome in ("NO", "DOWN"):
+                    return float(price)
+
+    # Gamma API outcomePrices: JSON string "[up_price, down_price]"
+    prices = _parse_json_field(market.get("outcomePrices"))
+    if len(prices) >= 2:
+        idx = 0 if direction == "UP" else 1
+        try:
+            return float(prices[idx])
+        except (TypeError, ValueError):
+            pass
+
+    return 0.50
 
 
 # ── Live trader ──────────────────────────────────────────────────────────────────
@@ -408,8 +459,10 @@ class LiveTrader:
             )
             return None
 
-        if cost_usd < 1.0:
-            logger.warning("Trade size below $1 minimum — skipping")
+        if cost_usd < 5.0:
+            logger.warning(
+                f"Trade size ${cost_usd:.2f} below Polymarket $5 minimum — skipping"
+            )
             return None
 
         if market is None:

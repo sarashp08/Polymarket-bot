@@ -37,7 +37,7 @@ from bot.formatters import (
 from bot.telegram_bot import TelegramBot
 from data.kraken_feed import KrakenFeed
 from data.orderflow import OrderFlowAnalyzer
-from polymarket.client import PaperTrader, LiveTrader, find_active_market
+from polymarket.client import PaperTrader, LiveTrader, find_active_market, get_market_entry_price
 from risk.position_sizer import PositionSizer
 from signals.signal_engine import SignalEngine, TradeSignal
 from tracking.trade_tracker import TradeTracker
@@ -210,18 +210,16 @@ async def on_signal(sig: TradeSignal):
         logger.info("Trade skipped: max open positions reached or bankroll too low")
         return
 
-    # 3. Entry price (binary markets trade near 0.50)
-    entry_price = 0.50
-
-    # 4. Build question label
+    # 3. Build question label
     question = (
         f"Will BTC be HIGHER in {sig.timeframe}?"
         if sig.direction == "UP"
         else f"Will BTC be LOWER in {sig.timeframe}?"
     )
 
-    # 5. For live trading, find the active Polymarket market
+    # 4. For live trading, find the active Polymarket market
     market = None
+    entry_price = 0.50  # default for paper trading (simple 2x payout simulation)
     if not config.paper_trading:
         market = await find_active_market(sig.timeframe)
         if market is None:
@@ -229,8 +227,12 @@ async def on_signal(sig: TradeSignal):
                 f"⚠️ No active BTC {sig.timeframe} market found — trade skipped"
             )
             return
+        # Use the actual on-chain token price so share count and P&L are accurate
+        actual_price = get_market_entry_price(market, sig.direction)
+        if 0.01 <= actual_price <= 0.99:
+            entry_price = actual_price
 
-    # 6. Open position (paper or live)
+    # 5. Open position (paper or live)
     pos = trader.open_position(
         direction=sig.direction,
         cost_usd=size.amount_usd,

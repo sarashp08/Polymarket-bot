@@ -32,7 +32,7 @@ from bot.formatters import (
     fmt_status, fmt_positions,
 )
 from bot.telegram_bot import TelegramBot
-from data.binance_feed import BinanceFeed
+from data.kraken_feed import KrakenFeed as BinanceFeed
 from data.orderflow import OrderFlowAnalyzer
 from polymarket.client import PaperTrader, LiveTrader, find_active_market
 from risk.position_sizer import PositionSizer

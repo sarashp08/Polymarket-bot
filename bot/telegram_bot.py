@@ -64,10 +64,18 @@ class TelegramBot:
 
     # ── Command handlers ──────────────────────────────────────────────────────
 
+    async def _reply(self, text: str):
+        """Send a response always to the configured DM, never back into a group."""
+        await self._app.bot.send_message(
+            chat_id=self._chat_id,
+            text=text,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     async def _cmd_start(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
-        await update.message.reply_text(
+        await self._reply(
             "👋 *Polymarket BTC Bot is running!*\n"
             "─────────────────────────────\n"
             "/status — bankroll & session stats\n"
@@ -75,13 +83,12 @@ class TelegramBot:
             "/pause — stop opening new trades\n"
             "/resume — resume trading\n"
             "/help — show this message",
-            parse_mode=ParseMode.MARKDOWN,
         )
 
     async def _cmd_help(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
-        await update.message.reply_text(
+        await self._reply(
             "🤖 *Polymarket Bot Commands*\n"
             "─────────────────────────────\n"
             "/status — bankroll & session stats\n"
@@ -89,39 +96,34 @@ class TelegramBot:
             "/pause — stop opening new trades\n"
             "/resume — resume trading\n"
             "/help — this message",
-            parse_mode=ParseMode.MARKDOWN,
         )
 
     async def _cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
         text = self._status_provider() if self._status_provider else "Status unavailable."
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await self._reply(text)
 
     async def _cmd_positions(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
         text = self._positions_provider() if self._positions_provider else "Positions unavailable."
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await self._reply(text)
 
     async def _cmd_pause(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
         self.paused = True
-        await update.message.reply_text(
+        await self._reply(
             "⏸ Trading *paused* — existing positions still resolve normally.\n"
             "Send /resume to restart.",
-            parse_mode=ParseMode.MARKDOWN,
         )
 
     async def _cmd_resume(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not self._authorized(update):
             return
         self.paused = False
-        await update.message.reply_text(
-            "▶️ Trading *resumed*.",
-            parse_mode=ParseMode.MARKDOWN,
-        )
+        await self._reply("▶️ Trading *resumed*.")
 
     async def _cmd_chatid(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """No auth gate — anyone can call this to discover chat/user IDs."""

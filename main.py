@@ -22,9 +22,12 @@ Loops running concurrently:
 """
 
 import asyncio
+import json
 import logging
 import signal
 import sys
+import time
+from pathlib import Path
 
 from config import config
 from bot.formatters import (
@@ -94,9 +97,90 @@ telegram = TelegramBot(
     chat_id=config.telegram_chat_id,
 )
 
+# ── Dashboard IPC ──────────────────────────────────────────────────────────────
+
+_cmd_seq_seen: int = -1
+_signals_log: list = []
+
+
+def _append_signal_log(sig: TradeSignal):
+    global _signals_log
+    _signals_log.append({
+        "timeframe": sig.timeframe,
+        "direction": sig.direction,
+        "confidence": sig.confidence,
+        "signals_fired": sig.signals_fired,
+        "price": sig.price,
+        "timestamp": sig.timestamp,
+    })
+    _signals_log = _signals_log[-50:]
+    Path("signals_log.json").write_text(json.dumps(_signals_log))
+
+
+async def write_state_loop():
+    """Write live bot state to live_state.json every 2 s for the dashboard."""
+    while True:
+        try:
+            state = {
+                "btc_price": analyzer.latest_price(),
+                "cvd": {
+                    tf: analyzer.windows[tf].cvd
+                    for tf in ("5m", "15m")
+                    if tf in analyzer.windows
+                },
+                "ob_imbalance": analyzer.ob_imbalance(),
+                "buy_sell_ratio": {
+                    tf: analyzer.windows[tf].buy_sell_ratio
+                    for tf in ("5m", "15m")
+                    if tf in analyzer.windows
+                },
+                "paused": telegram.paused,
+                "paper_trading": config.paper_trading,
+                "risk_pct": sizer.risk_pct,
+                "bankroll": trader.bankroll,
+                "initial_bankroll": trader.initial_bankroll,
+                "session_start_bankroll": trader.session_start_bankroll,
+                "win_rate": trader.win_rate,
+                "total_closed": trader.total_closed,
+                "open_count": trader.open_count,
+                "updated_at": time.time(),
+            }
+            Path("live_state.json").write_text(json.dumps(state))
+        except Exception as exc:
+            logger.debug(f"State write error: {exc}")
+        await asyncio.sleep(2)
+
+
+async def read_commands_loop():
+    """Read dashboard commands from dashboard_cmds.json every 3 s."""
+    global _cmd_seq_seen
+    while True:
+        try:
+            p = Path("dashboard_cmds.json")
+            if p.exists():
+                cmds = json.loads(p.read_text())
+                seq = cmds.get("_seq", 0)
+                if seq != _cmd_seq_seen:
+                    _cmd_seq_seen = seq
+                    if "paused" in cmds:
+                        telegram.paused = cmds["paused"]
+                    if "risk_pct" in cmds:
+                        sizer.risk_pct = float(cmds["risk_pct"])
+                    close_id = cmds.get("close_position")
+                    if close_id and close_id in trader.positions:
+                        trader.resolve_position(close_id, analyzer.latest_price())
+                        logger.info(f"Dashboard closed position {close_id}")
+        except Exception as exc:
+            logger.debug(f"Command read error: {exc}")
+        await asyncio.sleep(3)
+
+
 # ── Signal handler ─────────────────────────────────────────────────────────────
 
 async def on_signal(sig: TradeSignal):
+    # Log signal to dashboard feed
+    _append_signal_log(sig)
+
     # 0. Pause guard — user sent /pause from phone
     if telegram.paused:
         logger.info("Trade skipped: bot is paused via Telegram /pause")
@@ -268,6 +352,8 @@ async def main():
         resolution_loop(),
         dashboard_loop(),
         telegram.start_polling(),
+        write_state_loop(),
+        read_commands_loop(),
         return_exceptions=True,
     )
 

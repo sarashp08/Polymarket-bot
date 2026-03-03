@@ -4,7 +4,7 @@ Polymarket BTC Direction Trading Bot
 Entry point — wires all components together and runs the async event loop.
 
 Components:
-  BinanceFeed      → streams trades + order book from Binance WebSocket
+  KrakenFeed       → polls trades + order book from Kraken public REST API
   OrderFlowAnalyzer→ maintains rolling CVD, volume, OB imbalance per timeframe
   SignalEngine     → fires TradeSignal when 2+ order-flow conditions align
   PaperTrader      → simulates Polymarket YES/NO positions (paper mode)
@@ -14,7 +14,7 @@ Components:
   TelegramBot      → sends alerts + receives /status /positions /pause /resume
 
 Loops running concurrently:
-  feed.start()              → Binance WebSocket (trade + orderbook)
+  feed.start()              → Kraken REST polling (trades every 1 s, OB every 2 s)
   signal_loop()             → evaluates signals every 30 s per timeframe
   resolution_loop()         → checks for expired positions every 10 s
   dashboard_loop()          → sends hourly P&L dashboard to Telegram
@@ -32,7 +32,7 @@ from bot.formatters import (
     fmt_status, fmt_positions,
 )
 from bot.telegram_bot import TelegramBot
-from data.kraken_feed import KrakenFeed as BinanceFeed
+from data.kraken_feed import KrakenFeed
 from data.orderflow import OrderFlowAnalyzer
 from polymarket.client import PaperTrader, LiveTrader, find_active_market
 from risk.position_sizer import PositionSizer
@@ -45,7 +45,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.StreamHandler(sys.stdout),
         logging.FileHandler("bot.log"),
     ],
 )
@@ -53,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 # ── Component wiring ───────────────────────────────────────────────────────────
 
-feed = BinanceFeed(symbol=config.binance_symbol_lower)
+feed = KrakenFeed()
 
 analyzer = OrderFlowAnalyzer(whale_threshold=config.whale_usd_threshold)
 

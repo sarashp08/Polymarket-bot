@@ -1,31 +1,34 @@
 """
-Kraken WebSocket feed — drop-in replacement for BinanceFeed.
+Kraken REST polling feed — drop-in replacement for the WebSocket feed.
 
-Streams two channels concurrently via Kraken WS v1 API:
-  - trade   → individual executed trades (price, qty, aggressor side)
-  - book-25 → top-25 order book, snapshot + incremental updates
+Uses Kraken's free public REST API (no auth required), accessible from this
+server unlike WebSocket connections which are firewall-blocked.
 
-Both channels auto-reconnect with a 5 s back-off on failure.
-Exposes the same Trade / OrderBook dataclasses and callback interface
-as the original BinanceFeed so main.py needs only one import change.
+Two async loops run concurrently:
+  - Trade poller    → GET /0/public/Trades every 1 s  (incremental via `since`)
+  - Orderbook poll  → GET /0/public/Depth  every 2 s  (full top-25 snapshot)
+
+Pyth Hermes (Polymarket's own on-chain oracle) is also available for price
+confirmation: https://hermes.pyth.network — but Kraken alone provides the
+full trade + order-book stream the signal engine needs.
 """
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional
+from typing import Callable, Optional
 
-import websockets
+import requests
 
 logger = logging.getLogger(__name__)
 
-KRAKEN_WS   = "wss://ws.kraken.com"
-KRAKEN_PAIR = "XBT/USD"
+KRAKEN_BASE       = "https://api.kraken.com/0/public"
+KRAKEN_PAIR       = "XBTUSD"       # Kraken symbol for BTC/USD
+KRAKEN_RESULT_KEY = "XXBTZUSD"     # key inside the result dict
 
 
-# ── Data models (identical interface to binance_feed) ───────────────────────
+# ── Data models ─────────────────────────────────────────────────────────────────
 
 @dataclass
 class Trade:
@@ -65,17 +68,15 @@ class OrderBook:
         return (self.best_bid + self.best_ask) / 2.0
 
 
-# ── Feed ────────────────────────────────────────────────────────────────────
+# ── Feed ────────────────────────────────────────────────────────────────────────
 
 class KrakenFeed:
     def __init__(self, symbol: str = "btcusdt"):
-        # `symbol` param kept for interface compatibility — Kraken always uses XBT/USD
+        # symbol param kept for interface compatibility — ignored internally
         self._trade_cb: Optional[Callable] = None
         self._ob_cb: Optional[Callable] = None
         self._running = False
-        # Local order-book state for incremental updates
-        self._bids: Dict[str, str] = {}
-        self._asks: Dict[str, str] = {}
+        self._since: Optional[str] = None  # nanosecond cursor string
 
     def on_trade(self, callback: Callable) -> "KrakenFeed":
         self._trade_cb = callback
@@ -85,121 +86,99 @@ class KrakenFeed:
         self._ob_cb = callback
         return self
 
-    # ── Trade stream ──────────────────────────────────────────────────────────
+    # ── Trade polling ──────────────────────────────────────────────────────────
 
-    async def _stream_trades(self):
-        url = KRAKEN_WS
+    async def _poll_trades(self):
+        """Fetch new trades every second using the `since` cursor."""
+        # Seed cursor to current tip so we only process trades going forward
+        try:
+            r = requests.get(
+                f"{KRAKEN_BASE}/Trades",
+                params={"pair": KRAKEN_PAIR},
+                timeout=8,
+            )
+            self._since = r.json()["result"]["last"]
+            logger.info("Kraken trade feed seeded — polling every 1 s")
+        except Exception as exc:
+            logger.warning(f"Trade feed seed failed: {exc}")
+
         while self._running:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
-                    await ws.send(json.dumps({
-                        "event": "subscribe",
-                        "pair": [KRAKEN_PAIR],
-                        "subscription": {"name": "trade"},
-                    }))
-                    logger.info("Connected to Kraken trade stream")
-                    async for raw in ws:
-                        if not self._running:
-                            break
-                        msg = json.loads(raw)
-                        # Kraken trade: [chanID, [[price,vol,time,side,...], ...], "trade", "XBT/USD"]
-                        if not isinstance(msg, list) or len(msg) < 4 or msg[2] != "trade":
-                            continue
-                        for entry in msg[1]:
-                            price    = float(entry[0])
-                            qty      = float(entry[1])
-                            ts_ms    = int(float(entry[2]) * 1000)
-                            side     = entry[3]  # "b" = buyer aggressor, "s" = seller aggressor
-                            # "b" → aggressive BUY  → is_buyer_maker = False
-                            # "s" → aggressive SELL → is_buyer_maker = True
-                            is_buyer_maker = (side == "s")
-                            if self._trade_cb:
-                                await self._trade_cb(Trade(
-                                    symbol="BTCUSD",
-                                    price=price,
-                                    quantity=qty,
-                                    usd_value=price * qty,
-                                    is_buyer_maker=is_buyer_maker,
-                                    timestamp_ms=ts_ms,
-                                ))
+                params = {"pair": KRAKEN_PAIR}
+                if self._since:
+                    params["since"] = self._since
+
+                r = requests.get(f"{KRAKEN_BASE}/Trades", params=params, timeout=8)
+                data = r.json()
+
+                trades    = data["result"].get(KRAKEN_RESULT_KEY, [])
+                new_since = data["result"].get("last")
+
+                for entry in trades:
+                    # entry: [price, volume, time, side, orderType, misc, tradeId]
+                    price = float(entry[0])
+                    qty   = float(entry[1])
+                    ts_ms = int(float(entry[2]) * 1000)
+                    side  = entry[3]  # "b" = buyer aggressor, "s" = seller aggressor
+
+                    # "s" → seller hit the bid → is_buyer_maker = True
+                    is_buyer_maker = (side == "s")
+
+                    if self._trade_cb:
+                        await self._trade_cb(Trade(
+                            symbol="BTCUSD",
+                            price=price,
+                            quantity=qty,
+                            usd_value=price * qty,
+                            is_buyer_maker=is_buyer_maker,
+                            timestamp_ms=ts_ms,
+                        ))
+
+                if new_since:
+                    self._since = new_since
+
             except Exception as exc:
-                if self._running:
-                    logger.warning(f"Trade stream error: {exc} — reconnecting in 5 s")
-                    await asyncio.sleep(5)
+                logger.warning(f"Trade poll error: {exc}")
 
-    # ── Order book stream ──────────────────────────────────────────────────────
+            await asyncio.sleep(1)
 
-    def _apply_levels(self, side_dict: Dict[str, str], updates: list):
-        """Apply incremental order-book update; qty '0' removes the level."""
-        for level in updates:
-            price_str = level[0]
-            qty_str   = level[1]
-            if float(qty_str) == 0.0:
-                side_dict.pop(price_str, None)
-            else:
-                side_dict[price_str] = qty_str
+    # ── Order book polling ─────────────────────────────────────────────────────
 
-    def _emit_book(self) -> Optional[OrderBook]:
-        if not self._bids or not self._asks:
-            return None
-        sorted_bids = sorted(self._bids.items(), key=lambda x: float(x[0]), reverse=True)[:20]
-        sorted_asks = sorted(self._asks.items(), key=lambda x: float(x[0]))[:20]
-        return OrderBook(
-            bids=[[p, q] for p, q in sorted_bids],
-            asks=[[p, q] for p, q in sorted_asks],
-            timestamp_ms=int(time.time() * 1000),
-        )
-
-    async def _stream_orderbook(self):
-        url = KRAKEN_WS
+    async def _poll_orderbook(self):
+        """Fetch top-25 order book snapshot every 2 seconds."""
+        logger.info("Kraken orderbook feed started — polling every 2 s")
         while self._running:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
-                    await ws.send(json.dumps({
-                        "event": "subscribe",
-                        "pair": [KRAKEN_PAIR],
-                        "subscription": {"name": "book", "depth": 25},
-                    }))
-                    logger.info("Connected to Kraken order book stream")
-                    self._bids.clear()
-                    self._asks.clear()
-                    async for raw in ws:
-                        if not self._running:
-                            break
-                        msg = json.loads(raw)
-                        if not isinstance(msg, list) or len(msg) < 3:
-                            continue
-                        data = msg[1]
-                        if not isinstance(data, dict):
-                            continue
-                        # Snapshot keys: "bs" (bid snapshot), "as" (ask snapshot)
-                        if "bs" in data:
-                            for lvl in data["bs"]:
-                                self._bids[lvl[0]] = lvl[1]
-                        if "as" in data:
-                            for lvl in data["as"]:
-                                self._asks[lvl[0]] = lvl[1]
-                        # Incremental keys: "b" (bid update), "a" (ask update)
-                        if "b" in data:
-                            self._apply_levels(self._bids, data["b"])
-                        if "a" in data:
-                            self._apply_levels(self._asks, data["a"])
-                        if self._ob_cb:
-                            ob = self._emit_book()
-                            if ob:
-                                await self._ob_cb(ob)
-            except Exception as exc:
-                if self._running:
-                    logger.warning(f"Orderbook stream error: {exc} — reconnecting in 5 s")
-                    await asyncio.sleep(5)
+                r = requests.get(
+                    f"{KRAKEN_BASE}/Depth",
+                    params={"pair": KRAKEN_PAIR, "count": 25},
+                    timeout=8,
+                )
+                data = r.json()
+                book = data["result"].get(KRAKEN_RESULT_KEY, {})
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+                bids = [[b[0], b[1]] for b in book.get("bids", [])]
+                asks = [[a[0], a[1]] for a in book.get("asks", [])]
+
+                if self._ob_cb and bids and asks:
+                    await self._ob_cb(OrderBook(
+                        bids=bids,
+                        asks=asks,
+                        timestamp_ms=int(time.time() * 1000),
+                    ))
+
+            except Exception as exc:
+                logger.warning(f"Orderbook poll error: {exc}")
+
+            await asyncio.sleep(2)
+
+    # ── Lifecycle ──────────────────────────────────────────────────────────────
 
     async def start(self):
         self._running = True
         await asyncio.gather(
-            self._stream_trades(),
-            self._stream_orderbook(),
+            self._poll_trades(),
+            self._poll_orderbook(),
         )
 
     def stop(self):

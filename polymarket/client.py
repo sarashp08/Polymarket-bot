@@ -460,10 +460,18 @@ class LiveTrader:
             return None
 
         if cost_usd < 5.0:
-            logger.warning(
-                f"Trade size ${cost_usd:.2f} below Polymarket $5 minimum — skipping"
-            )
-            return None
+            if self.bankroll >= 5.0:
+                # Clamp up to Polymarket's $5 minimum rather than skipping
+                logger.info(
+                    f"Trade size ${cost_usd:.2f} clamped to $5 minimum "
+                    f"(bankroll: ${self.bankroll:.2f})"
+                )
+                cost_usd = 5.0
+            else:
+                logger.warning(
+                    f"Bankroll ${self.bankroll:.2f} below $5 minimum — skipping"
+                )
+                return None
 
         if market is None:
             logger.error("No market provided — cannot place live order")

@@ -23,6 +23,8 @@ live_state.json
 signals_log.json
 dashboard_cmds.json
 dashboard.log
+tunnel.log
+bore.log
 
 # OS
 .DS_Store

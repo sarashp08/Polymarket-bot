@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Polymarket Bot Dashboard</title>
+<style>
+  :root {
+    --bg:      #0d1117;
+    --bg2:     #161b22;
+    --bg3:     #21262d;
+    --border:  #30363d;
+    --fg:      #e6edf3;
+    --fg2:     #8b949e;
+    --green:   #3fb950;
+    --red:     #f85149;
+    --yellow:  #d29922;
+    --blue:    #58a6ff;
+    --radius:  8px;
+    --gap:     14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: .5px; }
+  header h1 span { color: var(--blue); }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: .5px; }
+  .badge-live   { background: rgba(63,185,80,.15);  color: var(--green);  border: 1px solid rgba(63,185,80,.3); }
+  .badge-paper  { background: rgba(88,166,255,.15); color: var(--blue);   border: 1px solid rgba(88,166,255,.3); }
+  .badge-paused { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  #last-update { color: var(--fg2); font-size: 11px; }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-rows: auto auto 1fr auto;
+    gap: var(--gap);
+    padding: var(--gap);
+  }
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; }
+  .card-label { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+  .card-value { font-size: 22px; font-weight: 700; line-height: 1; }
+  .card-sub { font-size: 11px; color: var(--fg2); margin-top: 4px; }
+  .green { color: var(--green); }
+  .red   { color: var(--red); }
+  .blue  { color: var(--blue); }
+  .yellow{ color: var(--yellow); }
+  .mid-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); min-height: 0; }
+  .market-panel { display: flex; flex-direction: column; gap: 10px; }
+  .price-row { display: flex; align-items: baseline; gap: 10px; }
+  #btc-price { font-size: 28px; font-weight: 700; }
+  #btc-change { font-size: 13px; font-weight: 600; }
+  .gauge-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .gauge-box { background: var(--bg3); border-radius: var(--radius); padding: 10px 12px; }
+  .gauge-title { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+  .gauge-val { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .progress-bar { width: 100%; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 3px; }
+  .cvd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cvd-box { background: var(--bg3); border-radius: var(--radius); padding: 10px 12px; }
+  .cvd-title { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+  .cvd-val { font-size: 14px; font-weight: 700; }
+  .cvd-label { font-size: 10px; color: var(--fg2); margin-top: 2px; }
+  .signal-feed { display: flex; flex-direction: column; }
+  .panel-title { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+  #signal-list { display: flex; flex-direction: column; gap: 6px; }
+  .signal-item { background: var(--bg3); border-radius: 6px; padding: 8px 10px; border-left: 3px solid var(--border); }
+  .signal-item.up   { border-left-color: var(--green); }
+  .signal-item.down { border-left-color: var(--red); }
+  .signal-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .signal-dir { font-size: 12px; font-weight: 700; }
+  .signal-dir.up   { color: var(--green); }
+  .signal-dir.down { color: var(--red); }
+  .signal-meta { font-size: 10px; color: var(--fg2); }
+  .signal-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--bg2); color: var(--fg2); border: 1px solid var(--border); }
+  .no-signals { color: var(--fg2); font-size: 12px; padding: 20px 0; text-align: center; }
+  .positions-section { min-height: 0; display: flex; flex-direction: column; }
+  #positions-table-wrap { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg2); }
+  table { width: 100%; border-collapse: collapse; }
+  thead { background: var(--bg2); }
+  th { padding: 8px 12px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--fg2); border-bottom: 1px solid var(--border); font-weight: 500; }
+  td { padding: 8px 12px; font-size: 12px; border-bottom: 1px solid rgba(48,54,61,.5); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .dir-badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 700; }
+  .dir-up   { background: rgba(63,185,80,.15); color: var(--green); }
+  .dir-down { background: rgba(248,81,73,.15);  color: var(--red); }
+  .empty-row td { text-align: center; color: var(--fg2); padding: 20px; }
+  footer {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .ctrl-group { display: flex; align-items: center; gap: 10px; }
+  .ctrl-label { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+  .ctrl-divider { width: 1px; height: 28px; background: var(--border); }
+  .toggle-wrap { display: flex; align-items: center; gap: 8px; }
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider-track { position: absolute; inset: 0; background: rgba(63,185,80,.2); border-radius: 11px; border: 1px solid var(--green); }
+  .slider-track::before { content: ''; position: absolute; left: 21px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--green); }
+  .toggle-label { font-size: 12px; font-weight: 600; min-width: 50px; color: var(--green); }
+  .risk-wrap { display: flex; align-items: center; gap: 10px; }
+  .risk-bar { width: 130px; height: 4px; background: var(--bg3); border-radius: 2px; position: relative; }
+  .risk-fill { height: 100%; background: var(--blue); border-radius: 2px; width: 100%; }
+  .risk-thumb { position: absolute; right: -7px; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--blue); border: 2px solid var(--bg); }
+  #risk-value { font-size: 13px; font-weight: 700; color: var(--blue); min-width: 38px; }
+  .mode-switch { display: flex; align-items: center; gap: 6px; }
+  .mode-btn { padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--bg3); color: var(--fg2); font-family: inherit; letter-spacing: .3px; }
+  .mode-btn.active-live { background: rgba(63,185,80,.15); color: var(--green); border-color: rgba(63,185,80,.4); }
+  .snapshot-banner {
+    background: rgba(210,153,34,.1);
+    border: 1px solid rgba(210,153,34,.3);
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--yellow);
+    text-align: center;
+    margin: var(--gap) var(--gap) 0;
+  }
+  @media (max-width: 900px) {
+    .kpi-row { grid-template-columns: repeat(2, 1fr); }
+    .mid-row  { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Poly<span>market</span> Bot Dashboard</h1>
+  <div class="header-right">
+    <span class="badge badge-live">LIVE</span>
+    <span class="badge badge-live">RUNNING</span>
+    <span id="last-update">Snapshot — 2026-03-03 18:17 UTC</span>
+    <div class="conn-dot" title="Static snapshot"></div>
+  </div>
+</header>
+
+<div class="snapshot-banner">
+  ⚠ Static snapshot — refresh this page or re-export from Claude Code to get updated data
+</div>
+
+<main>
+
+  <!-- KPI row -->
+  <div class="kpi-row">
+    <div class="card">
+      <div class="card-label">Bankroll</div>
+      <div class="card-value">$14.00</div>
+      <div class="card-sub">Total P&amp;L: +$0.00</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Session P&amp;L</div>
+      <div class="card-value green">+$0.00</div>
+      <div class="card-sub">Session ROI: +0.00%</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Win Rate</div>
+      <div class="card-value red">0.0%</div>
+      <div class="card-sub">0 closed trades</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Open Positions</div>
+      <div class="card-value">0</div>
+      <div class="card-sub">Max 3 simultaneous</div>
+    </div>
+  </div>
+
+  <!-- Mid row -->
+  <div class="mid-row">
+
+    <!-- BTC + Order Flow -->
+    <div class="card market-panel">
+      <div class="panel-title">BTC / USDT · Order Flow</div>
+      <div class="price-row">
+        <div id="btc-price">$68,281.10</div>
+        <div id="btc-change" class="green">+0.003%</div>
+      </div>
+
+      <div class="gauge-row">
+        <div class="gauge-box">
+          <div class="gauge-title">OB Imbalance</div>
+          <div class="gauge-val green">64.6%</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:64.6%;background:var(--green)"></div>
+          </div>
+          <div class="card-sub">Bid-heavy (bullish)</div>
+        </div>
+        <div class="gauge-box">
+          <div class="gauge-title">Buy/Sell Ratio · 15m</div>
+          <div class="gauge-val green">73.8% buys</div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width:73.8%;background:var(--green)"></div>
+          </div>
+          <div class="card-sub">Buyers dominant</div>
+        </div>
+      </div>
+
+      <div class="cvd-row">
+        <div class="cvd-box">
+          <div class="cvd-title">CVD · 5m</div>
+          <div class="cvd-val green">+3.853 BTC</div>
+          <div class="cvd-label">BTC net delta</div>
+        </div>
+        <div class="cvd-box">
+          <div class="cvd-title">CVD · 15m</div>
+          <div class="cvd-val green">+3.781 BTC</div>
+          <div class="cvd-label">BTC net delta</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Signal Feed -->
+    <div class="card signal-feed">
+      <div class="panel-title">Signal Feed</div>
+      <div id="signal-list">
+        <div class="signal-item up">
+          <div class="signal-top">
+            <span class="signal-dir up">▲ UP · 15m</span>
+            <span class="signal-meta">60% conf · $68,270.40 · 17m ago</span>
+          </div>
+          <div class="signal-tags">
+            <span class="tag">OB Imbalance 64% bids</span>
+            <span class="tag">Buy Ratio 63%</span>
+            <span class="tag">Vol Spike 0.6M USD</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Open Positions table -->
+  <div class="card positions-section">
+    <div class="panel-title" style="flex-shrink:0;margin-bottom:8px">Open Positions</div>
+    <div id="positions-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Direction</th>
+            <th>TF</th>
+            <th>Size</th>
+            <th>Shares</th>
+            <th>Entry $ BTC</th>
+            <th>Time Open</th>
+            <th>Resolves In</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="empty-row"><td colspan="9">No open positions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Controls footer -->
+  <footer>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Bot</span>
+      <div class="toggle-wrap">
+        <label class="toggle">
+          <input type="checkbox" checked disabled />
+          <span class="slider-track"></span>
+        </label>
+        <span class="toggle-label">Running</span>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">Mode</span>
+      <div class="mode-switch">
+        <button class="mode-btn">Paper</button>
+        <button class="mode-btn active-live">Live</button>
+      </div>
+    </div>
+
+    <div class="ctrl-divider"></div>
+
+    <div class="ctrl-group">
+      <span class="ctrl-label">Risk / Trade</span>
+      <div class="risk-wrap">
+        <div class="risk-bar">
+          <div class="risk-fill"></div>
+          <div class="risk-thumb"></div>
+        </div>
+        <span id="risk-value">10.0%</span>
+      </div>
+    </div>
+  </footer>
+
+</main>
+
+</body>
+</html>

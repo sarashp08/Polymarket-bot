@@ -23,8 +23,8 @@ class Config:
             tf.strip() for tf in os.getenv("TIMEFRAMES", "15m").split(",")
         ]
     )
-    min_confluence: int = 2                          # signals needed to fire a trade
-    cvd_threshold: float = float(os.getenv("CVD_THRESHOLD", "5.0"))     # BTC units
+    min_confluence: int = int(os.getenv("MIN_CONFLUENCE", "3"))  # signals needed to fire a trade
+    cvd_threshold: float = float(os.getenv("CVD_THRESHOLD", "0.3"))     # BTC units
     ob_imbalance_threshold: float = 0.60            # bid ratio above this = bullish
     volume_spike_multiplier: float = 2.0            # Nx rolling average = spike
     whale_usd_threshold: float = float(os.getenv("WHALE_THRESHOLD", "50000"))

@@ -16,9 +16,13 @@ env/
 # Environment / secrets
 .env
 
-# Bot state
+# Bot state / runtime files
 trades.json
 bot.log
+live_state.json
+signals_log.json
+dashboard_cmds.json
+dashboard.log
 
 # OS
 .DS_Store

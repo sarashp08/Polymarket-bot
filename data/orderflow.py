@@ -182,5 +182,10 @@ class OrderFlowAnalyzer:
         )
 
     def latest_price(self) -> float:
-        snap = self.windows["5m"].price_now
-        return snap or 0.0
+        # Check 15m window first (primary timeframe), fall back to 5m
+        for tf in ("15m", "5m"):
+            if tf in self.windows:
+                p = self.windows[tf].price_now
+                if p:
+                    return p
+        return 0.0

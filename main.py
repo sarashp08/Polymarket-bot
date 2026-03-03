@@ -8,6 +8,7 @@ Components:
   OrderFlowAnalyzer→ maintains rolling CVD, volume, OB imbalance per timeframe
   SignalEngine     → fires TradeSignal when 2+ order-flow conditions align
   PaperTrader      → simulates Polymarket YES/NO positions (paper mode)
+  LiveTrader       → places real orders on Polymarket CLOB (live mode)
   PositionSizer    → computes trade size as fixed % of bankroll
   TradeTracker     → accumulates session stats for the dashboard
   TelegramBot      → sends alerts + receives /status /positions /pause /resume
@@ -15,7 +16,7 @@ Components:
 Loops running concurrently:
   feed.start()              → Binance WebSocket (trade + orderbook)
   signal_loop()             → evaluates signals every 30 s per timeframe
-  resolution_loop()         → checks for expired paper positions every 10 s
+  resolution_loop()         → checks for expired positions every 10 s
   dashboard_loop()          → sends hourly P&L dashboard to Telegram
   telegram.start_polling()  → listens for phone commands
 """
@@ -33,7 +34,7 @@ from bot.formatters import (
 from bot.telegram_bot import TelegramBot
 from data.binance_feed import BinanceFeed
 from data.orderflow import OrderFlowAnalyzer
-from polymarket.client import PaperTrader
+from polymarket.client import PaperTrader, LiveTrader, find_active_market
 from risk.position_sizer import PositionSizer
 from signals.signal_engine import SignalEngine, TradeSignal
 from tracking.trade_tracker import TradeTracker
@@ -65,10 +66,23 @@ engine = SignalEngine(
     cooldown_seconds=config.signal_cooldown_seconds,
 )
 
-trader = PaperTrader(
-    initial_bankroll=config.bankroll,
-    log_file=config.log_file,
-)
+# Choose trader based on mode
+if config.paper_trading:
+    trader = PaperTrader(
+        initial_bankroll=config.bankroll,
+        log_file=config.log_file,
+    )
+else:
+    trader = LiveTrader(
+        initial_bankroll=config.bankroll,
+        log_file=config.log_file,
+        host=config.polymarket_host,
+        chain_id=config.chain_id,
+        private_key=config.polymarket_private_key,
+        api_key=config.polymarket_api_key,
+        api_secret=config.polymarket_api_secret,
+        api_passphrase=config.polymarket_api_passphrase,
+    )
 
 sizer = PositionSizer(
     risk_pct=config.risk_per_trade_pct,
@@ -113,20 +127,27 @@ async def on_signal(sig: TradeSignal):
         logger.info("Trade skipped: max open positions reached or bankroll too low")
         return
 
-    # 4. Paper trade entry price
-    # On Polymarket, BTC 5m/15m binary markets typically open close to 0.50.
-    # We simulate buying at 0.50 (fair odds). Our edge comes from being right
-    # more than 50% of the time, not from price arbitrage.
+    # 3. Entry price (binary markets trade near 0.50)
     entry_price = 0.50
 
-    # 5. Build question label
+    # 4. Build question label
     question = (
         f"Will BTC be HIGHER in {sig.timeframe}?"
         if sig.direction == "UP"
         else f"Will BTC be LOWER in {sig.timeframe}?"
     )
 
-    # 6. Open paper position
+    # 5. For live trading, find the active Polymarket market
+    market = None
+    if not config.paper_trading:
+        market = await find_active_market(sig.timeframe)
+        if market is None:
+            await telegram.send(
+                f"⚠️ No active BTC {sig.timeframe} market found — trade skipped"
+            )
+            return
+
+    # 6. Open position (paper or live)
     pos = trader.open_position(
         direction=sig.direction,
         cost_usd=size.amount_usd,
@@ -134,6 +155,7 @@ async def on_signal(sig: TradeSignal):
         entry_btc_price=sig.price,
         question=question,
         timeframe=sig.timeframe,
+        **({"market": market} if market else {}),
     )
 
     if pos:
@@ -154,7 +176,7 @@ async def signal_loop():
 
 
 async def resolution_loop():
-    """Check for expired paper positions every 10 seconds."""
+    """Check for expired positions every 10 seconds."""
     while True:
         try:
             current_price = analyzer.latest_price()

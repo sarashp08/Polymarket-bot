@@ -45,7 +45,7 @@
   .badge-live   { background: rgba(63,185,80,.15);  color: var(--green);  border: 1px solid rgba(63,185,80,.3); }
   .badge-paper  { background: rgba(88,166,255,.15); color: var(--blue);   border: 1px solid rgba(88,166,255,.3); }
   .badge-paused { background: rgba(210,153,34,.15); color: var(--yellow); border: 1px solid rgba(210,153,34,.3); }
-  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); }
   #last-update { color: var(--fg2); font-size: 11px; }
   main {
     flex: 1;
@@ -73,15 +73,15 @@
   .gauge-title { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
   .gauge-val { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
   .progress-bar { width: 100%; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-  .progress-fill { height: 100%; border-radius: 3px; }
+  .progress-fill { height: 100%; border-radius: 3px; transition: width .4s; }
   .cvd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .cvd-box { background: var(--bg3); border-radius: var(--radius); padding: 10px 12px; }
   .cvd-title { font-size: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
   .cvd-val { font-size: 14px; font-weight: 700; }
   .cvd-label { font-size: 10px; color: var(--fg2); margin-top: 2px; }
-  .signal-feed { display: flex; flex-direction: column; }
+  .signal-feed { display: flex; flex-direction: column; overflow: hidden; }
   .panel-title { font-size: 11px; color: var(--fg2); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
-  #signal-list { display: flex; flex-direction: column; gap: 6px; }
+  #signal-list { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
   .signal-item { background: var(--bg3); border-radius: 6px; padding: 8px 10px; border-left: 3px solid var(--border); }
   .signal-item.up   { border-left-color: var(--green); }
   .signal-item.down { border-left-color: var(--red); }
@@ -125,13 +125,13 @@
   .toggle-label { font-size: 12px; font-weight: 600; min-width: 50px; color: var(--green); }
   .risk-wrap { display: flex; align-items: center; gap: 10px; }
   .risk-bar { width: 130px; height: 4px; background: var(--bg3); border-radius: 2px; position: relative; }
-  .risk-fill { height: 100%; background: var(--blue); border-radius: 2px; width: 100%; }
+  .risk-fill { height: 100%; background: var(--blue); border-radius: 2px; width: 0%; transition: width .4s; }
   .risk-thumb { position: absolute; right: -7px; top: -5px; width: 14px; height: 14px; border-radius: 50%; background: var(--blue); border: 2px solid var(--bg); }
   #risk-value { font-size: 13px; font-weight: 700; color: var(--blue); min-width: 38px; }
   .mode-switch { display: flex; align-items: center; gap: 6px; }
   .mode-btn { padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--bg3); color: var(--fg2); font-family: inherit; letter-spacing: .3px; }
-  .mode-btn.active-live { background: rgba(63,185,80,.15); color: var(--green); border-color: rgba(63,185,80,.4); }
-  .snapshot-banner {
+  .mode-btn.active { background: rgba(63,185,80,.15); color: var(--green); border-color: rgba(63,185,80,.4); }
+  .stale-banner {
     background: rgba(210,153,34,.1);
     border: 1px solid rgba(210,153,34,.3);
     border-radius: 6px;
@@ -152,15 +152,15 @@
 <header>
   <h1>Poly<span>market</span> Bot Dashboard</h1>
   <div class="header-right">
-    <span class="badge badge-live">LIVE</span>
-    <span class="badge badge-live">RUNNING</span>
-    <span id="last-update">Snapshot — 2026-03-03 18:17 UTC</span>
-    <div class="conn-dot" title="Static snapshot"></div>
+    <span id="mode-badge" class="badge badge-paper">PAPER</span>
+    <span id="status-badge" class="badge badge-paused">LOADING</span>
+    <span id="last-update">Fetching data…</span>
+    <div id="conn-dot" class="conn-dot" title="Data freshness"></div>
   </div>
 </header>
 
-<div class="snapshot-banner">
-  ⚠ Static snapshot — refresh this page or re-export from Claude Code to get updated data
+<div id="stale-banner" class="stale-banner" style="display:none">
+  ⚠ Data is stale — run <code>bash push_dashboard.sh</code> to refresh, or set up a cron job
 </div>
 
 <main>
@@ -169,22 +169,22 @@
   <div class="kpi-row">
     <div class="card">
       <div class="card-label">Bankroll</div>
-      <div class="card-value">$14.00</div>
-      <div class="card-sub">Total P&amp;L: +$0.00</div>
+      <div id="kpi-bankroll" class="card-value">—</div>
+      <div id="kpi-bankroll-sub" class="card-sub">Total P&amp;L: —</div>
     </div>
     <div class="card">
       <div class="card-label">Session P&amp;L</div>
-      <div class="card-value green">+$0.00</div>
-      <div class="card-sub">Session ROI: +0.00%</div>
+      <div id="kpi-pnl" class="card-value">—</div>
+      <div id="kpi-pnl-sub" class="card-sub">Session ROI: —</div>
     </div>
     <div class="card">
       <div class="card-label">Win Rate</div>
-      <div class="card-value red">0.0%</div>
-      <div class="card-sub">0 closed trades</div>
+      <div id="kpi-winrate" class="card-value">—</div>
+      <div id="kpi-winrate-sub" class="card-sub">— closed trades</div>
     </div>
     <div class="card">
       <div class="card-label">Open Positions</div>
-      <div class="card-value">0</div>
+      <div id="kpi-open" class="card-value">—</div>
       <div class="card-sub">Max 3 simultaneous</div>
     </div>
   </div>
@@ -196,38 +196,38 @@
     <div class="card market-panel">
       <div class="panel-title">BTC / USDT · Order Flow</div>
       <div class="price-row">
-        <div id="btc-price">$68,281.10</div>
-        <div id="btc-change" class="green">+0.003%</div>
+        <div id="btc-price">—</div>
+        <div id="btc-change"></div>
       </div>
 
       <div class="gauge-row">
         <div class="gauge-box">
           <div class="gauge-title">OB Imbalance</div>
-          <div class="gauge-val green">64.6%</div>
+          <div id="ob-val" class="gauge-val">—</div>
           <div class="progress-bar">
-            <div class="progress-fill" style="width:64.6%;background:var(--green)"></div>
+            <div id="ob-fill" class="progress-fill" style="width:0%"></div>
           </div>
-          <div class="card-sub">Bid-heavy (bullish)</div>
+          <div id="ob-sub" class="card-sub">—</div>
         </div>
         <div class="gauge-box">
           <div class="gauge-title">Buy/Sell Ratio · 15m</div>
-          <div class="gauge-val green">73.8% buys</div>
+          <div id="bsr-val" class="gauge-val">—</div>
           <div class="progress-bar">
-            <div class="progress-fill" style="width:73.8%;background:var(--green)"></div>
+            <div id="bsr-fill" class="progress-fill" style="width:0%"></div>
           </div>
-          <div class="card-sub">Buyers dominant</div>
+          <div id="bsr-sub" class="card-sub">—</div>
         </div>
       </div>
 
       <div class="cvd-row">
         <div class="cvd-box">
           <div class="cvd-title">CVD · 5m</div>
-          <div class="cvd-val green">+3.853 BTC</div>
+          <div id="cvd-5m" class="cvd-val">—</div>
           <div class="cvd-label">BTC net delta</div>
         </div>
         <div class="cvd-box">
           <div class="cvd-title">CVD · 15m</div>
-          <div class="cvd-val green">+3.781 BTC</div>
+          <div id="cvd-15m" class="cvd-val">—</div>
           <div class="cvd-label">BTC net delta</div>
         </div>
       </div>
@@ -237,17 +237,7 @@
     <div class="card signal-feed">
       <div class="panel-title">Signal Feed</div>
       <div id="signal-list">
-        <div class="signal-item up">
-          <div class="signal-top">
-            <span class="signal-dir up">▲ UP · 15m</span>
-            <span class="signal-meta">60% conf · $68,270.40 · 17m ago</span>
-          </div>
-          <div class="signal-tags">
-            <span class="tag">OB Imbalance 64% bids</span>
-            <span class="tag">Buy Ratio 63%</span>
-            <span class="tag">Vol Spike 0.6M USD</span>
-          </div>
-        </div>
+        <div class="no-signals">Loading…</div>
       </div>
     </div>
 
@@ -268,11 +258,10 @@
             <th>Entry $ BTC</th>
             <th>Time Open</th>
             <th>Resolves In</th>
-            <th></th>
           </tr>
         </thead>
-        <tbody>
-          <tr class="empty-row"><td colspan="9">No open positions</td></tr>
+        <tbody id="positions-tbody">
+          <tr class="empty-row"><td colspan="8">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -287,7 +276,7 @@
           <input type="checkbox" checked disabled />
           <span class="slider-track"></span>
         </label>
-        <span class="toggle-label">Running</span>
+        <span id="bot-toggle-label" class="toggle-label" style="color:var(--fg2)">Loading</span>
       </div>
     </div>
 
@@ -296,8 +285,8 @@
     <div class="ctrl-group">
       <span class="ctrl-label">Mode</span>
       <div class="mode-switch">
-        <button class="mode-btn">Paper</button>
-        <button class="mode-btn active-live">Live</button>
+        <button id="mode-paper-btn" class="mode-btn">Paper</button>
+        <button id="mode-live-btn" class="mode-btn">Live</button>
       </div>
     </div>
 
@@ -307,15 +296,221 @@
       <span class="ctrl-label">Risk / Trade</span>
       <div class="risk-wrap">
         <div class="risk-bar">
-          <div class="risk-fill"></div>
+          <div id="risk-fill" class="risk-fill"></div>
           <div class="risk-thumb"></div>
         </div>
-        <span id="risk-value">10.0%</span>
+        <span id="risk-value">—</span>
       </div>
     </div>
   </footer>
 
 </main>
+
+<script>
+(function () {
+  var _prevBtcPrice = 0;
+
+  function el(id) { return document.getElementById(id); }
+
+  function setText(id, text) {
+    var e = el(id);
+    if (e) e.textContent = text;
+  }
+
+  function fmtAge(ts) {
+    var secs = Math.floor(Date.now() / 1000 - ts);
+    if (secs < 5)   return 'just now';
+    if (secs < 60)  return secs + 's ago';
+    if (secs < 3600) return Math.floor(secs / 60) + 'm ago';
+    return Math.floor(secs / 3600) + 'h ago';
+  }
+
+  function fmtCountdown(resolveTime) {
+    var secs = Math.floor(resolveTime - Date.now() / 1000);
+    if (secs <= 0) return 'Resolving…';
+    if (secs < 60) return secs + 's';
+    return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+  }
+
+  function fmtUsd(n) {
+    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function render(d) {
+    var s = d.state || {};
+    var now = Date.now() / 1000;
+    var dataAge = s.updated_at ? now - s.updated_at : Infinity;
+    var stale = dataAge > 300; // 5 minutes
+
+    // Header
+    var modeBadge = el('mode-badge');
+    if (modeBadge) {
+      modeBadge.textContent = s.paper_trading ? 'PAPER' : 'LIVE';
+      modeBadge.className = 'badge ' + (s.paper_trading ? 'badge-paper' : 'badge-live');
+    }
+    var statusBadge = el('status-badge');
+    if (statusBadge) {
+      statusBadge.textContent = s.paused ? 'PAUSED' : 'RUNNING';
+      statusBadge.className = 'badge ' + (s.paused ? 'badge-paused' : 'badge-live');
+    }
+    var dot = el('conn-dot');
+    if (dot) dot.style.background = stale ? 'var(--red)' : 'var(--green)';
+    if (s.updated_at) {
+      setText('last-update', stale ? ('⚠ Stale — ' + fmtAge(s.updated_at)) : ('Updated ' + fmtAge(s.updated_at)));
+    } else {
+      setText('last-update', 'Bot offline — no data');
+    }
+    el('stale-banner').style.display = stale ? 'block' : 'none';
+
+    // KPIs
+    var bankroll = s.bankroll || 0;
+    var initial  = s.initial_bankroll || bankroll;
+    var totalPnl = bankroll - initial;
+    setText('kpi-bankroll', fmtUsd(bankroll));
+    setText('kpi-bankroll-sub', 'Total P&L: ' + (totalPnl >= 0 ? '+' : '') + fmtUsd(totalPnl));
+
+    var sessionStart = s.session_start_bankroll || bankroll;
+    var sessionPnl   = bankroll - sessionStart;
+    var sessionRoi   = sessionStart > 0 ? (sessionPnl / sessionStart * 100) : 0;
+    var pnlEl = el('kpi-pnl');
+    if (pnlEl) {
+      pnlEl.textContent = (sessionPnl >= 0 ? '+' : '') + fmtUsd(sessionPnl);
+      pnlEl.className = 'card-value ' + (sessionPnl >= 0 ? 'green' : 'red');
+    }
+    setText('kpi-pnl-sub', 'Session ROI: ' + (sessionRoi >= 0 ? '+' : '') + sessionRoi.toFixed(2) + '%');
+
+    var winRate = (s.win_rate || 0) * 100;
+    var wrEl = el('kpi-winrate');
+    if (wrEl) {
+      wrEl.textContent = winRate.toFixed(1) + '%';
+      wrEl.className = 'card-value ' + (winRate >= 50 ? 'green' : 'red');
+    }
+    setText('kpi-winrate-sub', (s.total_closed || 0) + ' closed trades');
+    setText('kpi-open', s.open_count !== undefined ? s.open_count : '—');
+
+    // BTC price
+    var btcPrice = s.btc_price || 0;
+    setText('btc-price', btcPrice > 0 ? fmtUsd(btcPrice) : '—');
+    var changeEl = el('btc-change');
+    if (changeEl && _prevBtcPrice > 0 && btcPrice > 0) {
+      var chg = (btcPrice - _prevBtcPrice) / _prevBtcPrice * 100;
+      changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(3) + '%';
+      changeEl.className = chg >= 0 ? 'green' : 'red';
+    }
+    if (btcPrice > 0) _prevBtcPrice = btcPrice;
+
+    // OB Imbalance
+    var ob = s.ob_imbalance || 0;
+    var obPct = (ob * 100).toFixed(1);
+    var obEl = el('ob-val');
+    if (obEl) { obEl.textContent = obPct + '%'; obEl.className = 'gauge-val ' + (ob > 0.5 ? 'green' : 'red'); }
+    var obFill = el('ob-fill');
+    if (obFill) { obFill.style.width = obPct + '%'; obFill.style.background = ob > 0.5 ? 'var(--green)' : 'var(--red)'; }
+    setText('ob-sub', ob > 0.6 ? 'Bid-heavy (bullish)' : ob < 0.4 ? 'Ask-heavy (bearish)' : 'Balanced');
+
+    // Buy/Sell Ratio
+    var bsr = (s.buy_sell_ratio || {})['15m'] || (s.buy_sell_ratio || {})['5m'] || 0;
+    var bsrPct = (bsr * 100).toFixed(1);
+    var bsrEl = el('bsr-val');
+    if (bsrEl) { bsrEl.textContent = bsrPct + '% buys'; bsrEl.className = 'gauge-val ' + (bsr > 0.5 ? 'green' : 'red'); }
+    var bsrFill = el('bsr-fill');
+    if (bsrFill) { bsrFill.style.width = bsrPct + '%'; bsrFill.style.background = bsr > 0.5 ? 'var(--green)' : 'var(--red)'; }
+    setText('bsr-sub', bsr > 0.6 ? 'Buyers dominant' : bsr < 0.4 ? 'Sellers dominant' : 'Balanced');
+
+    // CVD
+    var cvd5  = (s.cvd || {})['5m']  || 0;
+    var cvd15 = (s.cvd || {})['15m'] || 0;
+    var c5 = el('cvd-5m');
+    if (c5) { c5.textContent = (cvd5 >= 0 ? '+' : '') + cvd5.toFixed(3) + ' BTC'; c5.className = 'cvd-val ' + (cvd5 >= 0 ? 'green' : 'red'); }
+    var c15 = el('cvd-15m');
+    if (c15) { c15.textContent = (cvd15 >= 0 ? '+' : '') + cvd15.toFixed(3) + ' BTC'; c15.className = 'cvd-val ' + (cvd15 >= 0 ? 'green' : 'red'); }
+
+    // Footer
+    var botLabel = el('bot-toggle-label');
+    if (botLabel) {
+      botLabel.textContent = s.paused ? 'Paused' : 'Running';
+      botLabel.style.color = s.paused ? 'var(--yellow)' : 'var(--green)';
+    }
+    setText('risk-value', (s.risk_pct || 0).toFixed(1) + '%');
+    var riskFill = el('risk-fill');
+    if (riskFill) riskFill.style.width = Math.min(100, (s.risk_pct || 0) * 5) + '%';
+
+    var paperBtn = el('mode-paper-btn');
+    var liveBtn  = el('mode-live-btn');
+    if (paperBtn && liveBtn) {
+      paperBtn.className = 'mode-btn' + (s.paper_trading ? ' active' : '');
+      liveBtn.className  = 'mode-btn' + (!s.paper_trading ? ' active' : '');
+    }
+
+    // Signals & positions
+    renderSignals(d.signals || []);
+    renderPositions(d.open_positions || []);
+  }
+
+  function renderSignals(signals) {
+    var list = el('signal-list');
+    if (!list) return;
+    if (!signals.length) { list.innerHTML = '<div class="no-signals">No signals yet</div>'; return; }
+    list.innerHTML = signals.slice().reverse().map(function (sig) {
+      var dir = sig.direction === 'UP' ? 'up' : 'down';
+      var arrow = sig.direction === 'UP' ? '▲' : '▼';
+      var conf = Math.round((sig.confidence || 0) * 100);
+      var price = (sig.price || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      var tags = (sig.signals_fired || []).map(function (t) { return '<span class="tag">' + t + '</span>'; }).join('');
+      var age = sig.timestamp ? fmtAge(sig.timestamp) : '';
+      return '<div class="signal-item ' + dir + '">'
+        + '<div class="signal-top">'
+        + '<span class="signal-dir ' + dir + '">' + arrow + ' ' + sig.direction + ' &middot; ' + (sig.timeframe || '') + '</span>'
+        + '<span class="signal-meta">' + conf + '% conf &middot; $' + price + (age ? ' &middot; ' + age : '') + '</span>'
+        + '</div>'
+        + '<div class="signal-tags">' + tags + '</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  function renderPositions(positions) {
+    var tbody = el('positions-tbody');
+    if (!tbody) return;
+    if (!positions.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">No open positions</td></tr>'; return; }
+    tbody.innerHTML = positions.map(function (p) {
+      var dir = p.direction === 'UP' ? 'up' : 'down';
+      var arrow = p.direction === 'UP' ? '▲' : '▼';
+      return '<tr>'
+        + '<td>' + (p.id || '—') + '</td>'
+        + '<td><span class="dir-badge dir-' + dir + '">' + arrow + ' ' + (p.direction || '') + '</span></td>'
+        + '<td>' + (p.timeframe || '—') + '</td>'
+        + '<td>' + fmtUsd(p.cost_usd || 0) + '</td>'
+        + '<td>' + (p.shares || 0).toFixed(2) + '</td>'
+        + '<td>' + fmtUsd(p.entry_btc_price || 0) + '</td>'
+        + '<td>' + (p.entry_time ? fmtAge(p.entry_time) : '—') + '</td>'
+        + '<td>' + (p.resolve_time ? fmtCountdown(p.resolve_time) : '—') + '</td>'
+        + '</tr>';
+    }).join('');
+  }
+
+  function loadData() {
+    fetch('data.json?t=' + Date.now())
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function () {
+        setText('last-update', 'No data — run push_dashboard.sh');
+        el('conn-dot').style.background = 'var(--red)';
+        el('stale-banner').style.display = 'block';
+        el('stale-banner').textContent = '⚠ No data.json found — run bash push_dashboard.sh from the bot directory';
+      });
+  }
+
+  // Initial load + refresh every 60 seconds
+  loadData();
+  setInterval(loadData, 60000);
+
+  // Update "X ago" timestamps every 15 seconds without re-fetching
+  setInterval(function () {
+    // Age of data.json export is shown via last-update, which re-renders on loadData.
+    // Just trigger a re-render of positions countdown timers if we have cached data.
+  }, 15000);
+})();
+</script>
 
 </body>
 </html>

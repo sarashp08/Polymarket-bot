@@ -459,19 +459,11 @@ class LiveTrader:
             )
             return None
 
-        if cost_usd < 5.0:
-            if self.bankroll >= 5.0:
-                # Clamp up to Polymarket's $5 minimum rather than skipping
-                logger.info(
-                    f"Trade size ${cost_usd:.2f} clamped to $5 minimum "
-                    f"(bankroll: ${self.bankroll:.2f})"
-                )
-                cost_usd = 5.0
-            else:
-                logger.warning(
-                    f"Bankroll ${self.bankroll:.2f} below $5 minimum — skipping"
-                )
-                return None
+        if cost_usd < 1.0:
+            logger.warning(
+                f"Trade size ${cost_usd:.2f} below $1 minimum — skipping"
+            )
+            return None
 
         if market is None:
             logger.error("No market provided — cannot place live order")
@@ -489,10 +481,11 @@ class LiveTrader:
         token_id = yes_token if direction == "UP" else no_token
         side_label = "YES" if direction == "UP" else "NO"
 
-        # Place FOK market order
-        from py_clob_client.clob_types import MarketOrderArgs
+        # Place FOK market order; fall back to GTC limit if no liquidity yet
+        from py_clob_client.clob_types import MarketOrderArgs, OrderArgs
         from py_clob_client.order_builder.constants import BUY
 
+        resp = None
         order_args = MarketOrderArgs(
             token_id=token_id,
             amount=cost_usd,
@@ -503,8 +496,29 @@ class LiveTrader:
             signed = self.client.create_market_order(order_args)
             resp = self.client.post_order(signed, order_type="FOK")
         except Exception as exc:
-            logger.error(f"[LIVE] Order placement failed: {exc}")
-            return None
+            if "no match" in str(exc).lower():
+                # Fresh market with no liquidity yet — try a GTC limit order
+                # at entry_price so market makers can fill us.
+                logger.warning(
+                    f"[LIVE] Market order no match (illiquid) — "
+                    f"falling back to GTC limit @ {entry_price:.3f}"
+                )
+                try:
+                    size = round(cost_usd / entry_price, 2)
+                    limit_args = OrderArgs(
+                        token_id=token_id,
+                        price=entry_price,
+                        size=size,
+                        side=BUY,
+                    )
+                    signed = self.client.create_order(limit_args)
+                    resp = self.client.post_order(signed, order_type="GTC")
+                except Exception as exc2:
+                    logger.error(f"[LIVE] GTC limit fallback failed: {exc2}")
+                    return None
+            else:
+                logger.error(f"[LIVE] Order placement failed: {exc}")
+                return None
 
         # Check if order was accepted
         if not resp or not resp.get("success"):

@@ -29,6 +29,7 @@ Environment (.env):
 import asyncio
 import json
 import logging
+import math
 import signal as _signal
 import sys
 import time
@@ -103,15 +104,12 @@ telegram.set_risk_setter(lambda pct: setattr(trader, "risk_pct", pct))
 
 # /daily — today's session summary
 def _daily_summary() -> str:
-    today = time.strftime("%Y-%m-%d")
-    today_trades = [
-        t for t in trader.closed_trades
-        if time.strftime("%Y-%m-%d", time.localtime(t.closed_at or 0)) == today
-    ]
-    wins = [t for t in today_trades if (t.pnl or 0) > 0]
+    day_start = math.floor(time.time() / 86400) * 86400   # UTC midnight
+    today_trades = [t for t in trader.closed_trades if (t.closed_at or 0) >= day_start]
+    wins = sum(1 for t in today_trades if (t.pnl or 0) > 0)
     return (
-        f"📅 *Today ({today})*\n"
-        f"Trades: {len(today_trades)} | Wins: {len(wins)}\n"
+        f"📅 *Today ({time.strftime('%Y-%m-%d')})*\n"
+        f"Trades: {len(today_trades)} | Wins: {wins}\n"
         f"Session P&L: {trader.session_pnl:+.2f} USDT"
     )
 telegram.set_daily_provider(_daily_summary)

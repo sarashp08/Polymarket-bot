@@ -14,6 +14,7 @@ The dashboard reads two JSON files updated by dcx_main.py:
 
 import json
 import time
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -49,19 +50,40 @@ def _load_json(path: str) -> Optional[Dict]:
         return None
 
 
+def _fetch_gist(url: str) -> Optional[Dict]:
+    """Fetch JSON from a raw Gist URL (used on Streamlit Cloud)."""
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+
+def _load_or_fetch(path: str, secret_key: str) -> Optional[Dict]:
+    """Read from Gist URL (Streamlit Cloud) or fall back to local file (VPS/dev)."""
+    try:
+        url = st.secrets[secret_key]
+        data = _fetch_gist(url)
+        if data is not None:
+            return data
+    except (KeyError, AttributeError):
+        pass
+    return _load_json(path)
+
+
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def load_state() -> Optional[Dict]:
-    return _load_json("dcx_state.json")
+    return _load_or_fetch("dcx_state.json", "GIST_STATE_URL")
 
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def load_trades() -> Optional[Dict]:
-    return _load_json("dcx_trades.json")
+    return _load_or_fetch("dcx_trades.json", "GIST_TRADES_URL")
 
 
 @st.cache_data(ttl=300)
 def load_backtest() -> Optional[Dict]:
-    return _load_json("dcx_backtest.json")
+    return _load_json("dcx_backtest.json")   # always from repo, never Gist
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────

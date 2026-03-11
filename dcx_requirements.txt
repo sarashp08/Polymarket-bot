@@ -1,0 +1,18 @@
+# CoinDCX Futures Bot — Python Dependencies
+# Install: pip install -r dcx_requirements.txt
+
+# Async HTTP
+aiohttp==3.9.5
+
+# Telegram bot
+python-telegram-bot==21.3
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Streamlit dashboard
+streamlit==1.32.0
+
+# Data processing (dashboard)
+pandas==2.0.3
+numpy==1.26.4

@@ -80,7 +80,7 @@ if state:
         f"**Last update:** {time.strftime('%H:%M:%S UTC', time.gmtime(last_update))}"
     )
 else:
-    st.sidebar.warning("Bot not running (no state file)")
+    st.sidebar.info("🔌 Bot offline — backtest data only")
 
 page = st.sidebar.radio(
     "View",
@@ -112,7 +112,11 @@ if page == "Live Overview":
     st.title("📈 Live Overview")
 
     if not state:
-        st.error("No live state file found. Is dcx_main.py running?")
+        st.info(
+            "Bot is offline — no live data available. "
+            "Run `python dcx_main.py` on your VPS to see live stats here. "
+            "Use the **Backtest Results** page to view strategy performance."
+        )
         st.stop()
 
     # ── KPI row ───────────────────────────────────────────────────────────────

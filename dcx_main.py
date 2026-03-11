@@ -98,6 +98,43 @@ trader.on_open(_on_open).on_close(_on_close)
 telegram.set_status_provider(lambda: fmt_status(trader, telegram.paused))
 telegram.set_positions_provider(lambda: fmt_positions(trader))
 
+# /risk — change risk % without restarting
+telegram.set_risk_setter(lambda pct: setattr(trader, "risk_pct", pct))
+
+# /daily — today's session summary
+def _daily_summary() -> str:
+    today = time.strftime("%Y-%m-%d")
+    today_trades = [
+        t for t in trader.closed_trades
+        if time.strftime("%Y-%m-%d", time.localtime(t.closed_at or 0)) == today
+    ]
+    wins = [t for t in today_trades if (t.pnl or 0) > 0]
+    return (
+        f"📅 *Today ({today})*\n"
+        f"Trades: {len(today_trades)} | Wins: {len(wins)}\n"
+        f"Session P&L: {trader.session_pnl:+.2f} USDT"
+    )
+telegram.set_daily_provider(_daily_summary)
+
+# /close <symbol> — force-close an open position at entry price
+def _force_close(sym: str) -> str:
+    for pid, pos in list(trader.positions.items()):
+        if pos.symbol == sym:
+            trader.close_position(pid, pos.entry_price, "MANUAL")
+            return f"✅ Closed {pos.direction} {sym}"
+    return f"❌ No open position for {sym}"
+telegram.set_close_fn(_force_close)
+
+# /symbols — list watched symbols + which have open positions
+def _symbol_list() -> str:
+    open_syms = {p.symbol for p in trader.positions.values()}
+    lines = [
+        ("🟢" if s in open_syms else "⚪") + f" {s}"
+        for s in cfg.symbols
+    ]
+    return "📊 *Watched Symbols*\n" + "\n".join(lines)
+telegram.set_symbols_provider(_symbol_list)
+
 # ── Main signal loop ──────────────────────────────────────────────────────────
 
 _last_candle_ts: dict = {s: 0 for s in cfg.symbols}

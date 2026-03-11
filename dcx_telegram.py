@@ -34,6 +34,11 @@ class DCXTelegramBot:
         self._status_provider: Optional[Callable[[], str]]    = None
         self._positions_provider: Optional[Callable[[], str]] = None
 
+        self._risk_setter: Optional[Callable]     = None
+        self._daily_provider: Optional[Callable]  = None
+        self._close_fn: Optional[Callable]        = None
+        self._symbols_provider: Optional[Callable]= None
+
         if self._enabled:
             self._app = Application.builder().token(token).build()
             self._register_handlers()
@@ -50,6 +55,18 @@ class DCXTelegramBot:
 
     def set_positions_provider(self, fn: Callable[[], str]):
         self._positions_provider = fn
+
+    def set_risk_setter(self, fn: Callable[[float], None]):
+        self._risk_setter = fn
+
+    def set_daily_provider(self, fn: Callable[[], str]):
+        self._daily_provider = fn
+
+    def set_close_fn(self, fn: Callable[[str], str]):
+        self._close_fn = fn
+
+    def set_symbols_provider(self, fn: Callable[[], str]):
+        self._symbols_provider = fn
 
     # ── Auth guard ─────────────────────────────────────────────────────────────
 
@@ -75,6 +92,10 @@ class DCXTelegramBot:
             "─────────────────────────────\n"
             "/status    — capital & P&L\n"
             "/positions — open positions\n"
+            "/daily     — today's summary\n"
+            "/symbols   — watched symbols\n"
+            "/risk 2    — set risk %\n"
+            "/close ETH — close a position\n"
             "/pause     — stop new trades\n"
             "/resume    — resume trading\n"
             "/help      — this message",
@@ -88,6 +109,10 @@ class DCXTelegramBot:
             "─────────────────────────────\n"
             "/status    — capital, P&L, win rate\n"
             "/positions — list open positions\n"
+            "/daily     — today's P&L summary\n"
+            "/symbols   — watched symbols & open status\n"
+            "/risk 2    — set risk per trade to 2%\n"
+            "/close ETH — force-close ETH position\n"
             "/pause     — halt new trade entries\n"
             "/resume    — re-enable entries\n"
             "/stop      — alias for /pause\n"
@@ -121,6 +146,53 @@ class DCXTelegramBot:
         self.paused = False
         await self._reply("▶️ Trading *resumed*.")
 
+    async def _cmd_risk(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorized(update):
+            return
+        if not ctx.args:
+            await self._reply("Usage: /risk <percent>  e.g. /risk 2")
+            return
+        try:
+            pct = float(ctx.args[0])
+        except ValueError:
+            await self._reply("❌ Invalid value. Example: /risk 2")
+            return
+        if not (0.5 <= pct <= 20):
+            await self._reply("❌ Risk must be between 0.5 and 20.")
+            return
+        if self._risk_setter:
+            self._risk_setter(pct)
+            await self._reply(f"✅ Risk per trade set to *{pct}%*.")
+        else:
+            await self._reply("Risk setter not available.")
+
+    async def _cmd_daily(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorized(update):
+            return
+        text = self._daily_provider() if self._daily_provider else "Daily summary unavailable."
+        await self._reply(text)
+
+    async def _cmd_close(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorized(update):
+            return
+        if not ctx.args:
+            await self._reply("Usage: /close <symbol>  e.g. /close ETH or /close B-ETH_USDT")
+            return
+        sym = ctx.args[0].upper()
+        if not sym.startswith("B-"):
+            sym = f"B-{sym}_USDT"
+        if self._close_fn:
+            result = self._close_fn(sym)
+            await self._reply(result)
+        else:
+            await self._reply("Close function not available.")
+
+    async def _cmd_symbols(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if not self._authorized(update):
+            return
+        text = self._symbols_provider() if self._symbols_provider else "Symbols unavailable."
+        await self._reply(text)
+
     async def _cmd_chatid(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         chat = update.effective_chat
         user = update.effective_user
@@ -139,6 +211,10 @@ class DCXTelegramBot:
         self._app.add_handler(CommandHandler("pause",     self._cmd_pause))
         self._app.add_handler(CommandHandler("stop",      self._cmd_pause))
         self._app.add_handler(CommandHandler("resume",    self._cmd_resume))
+        self._app.add_handler(CommandHandler("risk",      self._cmd_risk))
+        self._app.add_handler(CommandHandler("daily",     self._cmd_daily))
+        self._app.add_handler(CommandHandler("close",     self._cmd_close))
+        self._app.add_handler(CommandHandler("symbols",   self._cmd_symbols))
         self._app.add_handler(CommandHandler("chatid",    self._cmd_chatid))
 
     # ── Outbound ───────────────────────────────────────────────────────────────
@@ -166,6 +242,10 @@ class DCXTelegramBot:
         await self._app.bot.set_my_commands([
             BotCommand("status",    "Capital & P&L"),
             BotCommand("positions", "Open positions"),
+            BotCommand("daily",     "Today's P&L summary"),
+            BotCommand("symbols",   "Watched symbols & open status"),
+            BotCommand("risk",      "Set risk % (e.g. /risk 2)"),
+            BotCommand("close",     "Force-close position (e.g. /close ETH)"),
             BotCommand("pause",     "Pause new trades"),
             BotCommand("resume",    "Resume trading"),
             BotCommand("help",      "Command list"),

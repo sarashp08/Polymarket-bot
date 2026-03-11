@@ -25,6 +25,10 @@ dashboard_cmds.json
 dashboard.log
 tunnel.log
 bore.log
+dcx_state.json
+dcx_trades.json
+dcx_bot.log
+backtest_results.xlsx
 
 # OS
 .DS_Store

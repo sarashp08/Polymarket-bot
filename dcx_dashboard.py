@@ -53,7 +53,8 @@ def _load_json(path: str) -> Optional[Dict]:
 def _fetch_gist(url: str) -> Optional[Dict]:
     """Fetch JSON from a raw Gist URL (used on Streamlit Cloud)."""
     try:
-        with urllib.request.urlopen(url, timeout=5) as r:
+        cache_bust = f"?v={int(time.time())}"
+        with urllib.request.urlopen(url + cache_bust, timeout=5) as r:
             return json.loads(r.read())
     except Exception:
         return None
